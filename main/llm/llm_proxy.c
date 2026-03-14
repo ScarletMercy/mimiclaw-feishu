@@ -142,21 +142,21 @@ static esp_err_t resp_buf_append(resp_buf_t *rb, const char *data, size_t len)
 {
     while (rb->len + len >= rb->cap) {
         size_t new_cap = rb->cap * 2;
-        char *tmp = heap_caps_realloc(rb.data, new_cap, MALLOC_CAP_SPIRAM);
+        char *tmp = heap_caps_realloc(rb->data, new_cap, MALLOC_CAP_SPIRAM);
         if (!tmp) return ESP_ERR_NO_MEM;
-        rb.data = tmp;
+        rb->data = tmp;
         rb->cap = new_cap;
     }
-    memcpy(rb.data + rb->len, data, len);
+    memcpy(rb->data + rb->len, data, len);
     rb->len += len;
-    rb.data[rb->len] = '\0';
+    rb->data[rb->len] = '\0';
     return ESP_OK;
 }
 
 static void resp_buf_free(resp_buf_t *rb)
 {
-    free(rb.data);
-    rb.data = NULL;
+    free(rb->data);
+    rb->data = NULL;
     rb->len = 0;
     rb->cap = 0;
 }
@@ -165,17 +165,17 @@ static void resp_buf_free(resp_buf_t *rb)
 
 static void resp_buf_decode_chunked(resp_buf_t *rb)
 {
-    if (!rb.data || rb->len == 0) return;
+    if (!rb->data || rb->len == 0) return;
 
     /* Quick check: if body starts with '{' or '[', it's not chunked */
     size_t i = 0;
-    while (i < rb->len && (rb.data[i] == ' ' || rb.data[i] == '\t')) i++;
-    if (i < rb->len && (rb.data[i] == '{' || rb.data[i] == '[')) return;
+    while (i < rb->len && (rb->data[i] == ' ' || rb->data[i] == '\t')) i++;
+    if (i < rb->len && (rb->data[i] == '{' || rb->data[i] == '[')) return;
 
     /* Try to decode chunked encoding in-place */
-    char *src = rb.data;
-    char *dst = rb.data;
-    char *end = rb.data + rb->len;
+    char *src = rb->data;
+    char *dst = rb->data;
+    char *end = rb->data + rb->len;
 
     while (src < end) {
         /* Parse hex chunk size */
@@ -205,8 +205,8 @@ static void resp_buf_decode_chunked(resp_buf_t *rb)
         }
     }
 
-    rb->len = dst - rb.data;
-    rb.data[rb->len] = '\0';
+    rb->len = dst - rb->data;
+    rb->data[rb->len] = '\0';
 }
 
 /* ── HTTP event handler (for esp_http_client direct path) ─────── */
@@ -351,19 +351,19 @@ static esp_err_t llm_http_via_proxy(const char *post_data, resp_buf_t *rb, int *
 
     /* Parse status line */
     *out_status = 0;
-    if (rb->len > 5 && strncmp(rb.data, "HTTP/", 5) == 0) {
-        const char *sp = strchr(rb.data, ' ');
+    if (rb->len > 5 && strncmp(rb->data, "HTTP/", 5) == 0) {
+        const char *sp = strchr(rb->data, ' ');
         if (sp) *out_status = atoi(sp + 1);
     }
 
     /* Strip HTTP headers, keep body only */
-    char *body = strstr(rb.data, "\r\n\r\n");
+    char *body = strstr(rb->data, "\r\n\r\n");
     if (body) {
         body += 4;
-        size_t blen = rb->len - (body - rb.data);
-        memmove(rb.data, body, blen);
+        size_t blen = rb->len - (body - rb->data);
+        memmove(rb->data, body, blen);
         rb->len = blen;
-        rb.data[rb->len] = '\0';
+        rb->data[rb->len] = '\0';
     }
 
     /* Decode chunked transfer encoding if present */
