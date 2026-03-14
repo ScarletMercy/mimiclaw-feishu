@@ -61,7 +61,8 @@ static const char *llm_api_path(void)
     return provider_is_openai() || provider_is_longcat() ? "/v1/chat/completions" : "/v1/messages";
 }
 
-    size_t total = strlen(payload);
+static void llm_log_payload(const char *label, const char *payload);
+
 #if MIMI_LLM_LOG_VERBOSE_PAYLOAD
     size_t shown = total > LLM_DUMP_MAX_BYTES ? LLM_DUMP_MAX_BYTES : total;
     ESP_LOGI(TAG, "%s (%u bytes)%s",
@@ -210,28 +211,6 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
         resp_buf_append(rb, (const char *)evt->data, evt->data_len);
     }
     return ESP_OK;
-}
-
-/* ── Provider helpers ──────────────────────────────────────────── */
-
-static bool provider_is_openai(void)
-{
-    return strcmp(s_provider, "openai") == 0;
-}
-
-static const char *llm_api_url(void)
-{
-    return provider_is_openai() ? MIMI_OPENAI_API_URL : MIMI_LLM_API_URL;
-}
-
-static const char *llm_api_host(void)
-{
-    return provider_is_openai() ? "api.openai.com" : "api.anthropic.com";
-}
-
-static const char *llm_api_path(void)
-{
-    return provider_is_openai() ? "/v1/chat/completions" : "/v1/messages";
 }
 
 /* ── Init ─────────────────────────────────────────────────────── */
