@@ -8,8 +8,8 @@
 esp_err_t feishu_bot_init(void);
 
 /**
- * Start the Feishu webhook HTTP server for receiving events.
- * Listens on MIMI_FEISHU_WEBHOOK_PORT.
+ * Start the Feishu WebSocket long connection.
+ * Creates three tasks: WS task, event worker, and token refresh.
  */
 esp_err_t feishu_bot_start(void);
 
@@ -34,3 +34,18 @@ esp_err_t feishu_reply_message(const char *message_id, const char *text);
  * @param app_secret Feishu App Secret
  */
 esp_err_t feishu_set_credentials(const char *app_id, const char *app_secret);
+
+/* ==================== Test Helper Functions ==================== */
+
+/**
+ * Parse chat_id in form "open_id:ou_xxx" or "chat_id:oc_xxx"
+ * This is exposed for testing purposes.
+ */
+void feishu_parse_chat_id(const char *chat_id, char *out_type, size_t type_len,
+                          char *out_id, size_t id_len);
+
+/**
+ * Check if network is ready for Feishu (WiFi + DNS).
+ * @return true if ready, false otherwise
+ */
+bool feishu_network_ready(void);
