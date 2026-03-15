@@ -98,10 +98,10 @@ jobs:
     - name: Generate Version Info
       id: version
       run: |
-        echo "VERSION_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo 'v0.0.0')" >> $GITHUB_OUTPUTS
-        echo "VERSION_DATE=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUTS
-        echo "VERSION_COMMIT=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUTS
-        echo "VERSION_FULL=$(git describe --tags --always 2>/dev/null || git rev-parse --short HEAD)" >> $GITHUB_OUTPUTS
+        echo "VERSION_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo 'v0.0.0')" >> $GITHUB_OUTPUT
+        echo "VERSION_DATE=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+        echo "VERSION_COMMIT=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+        echo "VERSION_FULL=$(git describe --tags --always 2>/dev/null || git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
     - name: Upload Build Artifacts
       if: success()
