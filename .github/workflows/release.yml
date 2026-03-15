@@ -1,92 +1,272 @@
-name: Build & Release
+name: Release Firmware
 
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Create a new release'
+        required: false
+        default: 'false'
+        type: boolean
+      tag_name:
+        description: 'Tag name (e.g. v1.0.2)'
+        required: false
+        type: string
+      release_name:
+        description: 'Release name (e.g. Feishu Hybrid v1.0)'
+        required: false
+        type: string
+      body:
+        description: 'Release notes (markdown supported)'
+        required: false
+        type: string
+      draft:
+        description: 'Create as draft release'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  IDF_PATH: ${{ github.workspace }}/esp-idf
+  ESP_IDF_VERSION: v5.5.3
 
 jobs:
   build:
+    name: Build ESP32-S3 Firmware
     runs-on: ubuntu-latest
-    container:
-      image: espressif/idf:v5.5.2
-
+    
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
 
-      - name: Build firmware
-        shell: bash
-        run: |
-          . $IDF_PATH/export.sh
-          idf.py set-target esp32s3
-          idf.py build
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.9'
 
-      - name: Prepare release artifacts
-        shell: bash
-        run: |
-          . $IDF_PATH/export.sh
-          VERSION="${GITHUB_REF_NAME}"
+    - name: Cache ESP-IDF
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.espressif/python_env
+          ${{ github.workspace }}/esp-idf
+          ~/.idf_tools
+        key: ${{ runner.os }}-esp-idf-${{ env.ESP_IDF_VERSION }}-${{ hashFiles('**/sdkconfig.defaults*') }}
+        restore-keys: |
+          ${{ runner.os }}-esp-idf-${{ env.ESP_IDF_VERSION }}-
 
-          # Generate merged firmware for single-command flashing
-          esptool.py --chip esp32s3 merge_bin \
-            --flash_mode qio \
-            --flash_size 16MB \
-            --flash_freq 80m \
-            -o "mimiclaw-full-${VERSION}.bin" \
-            0x0     build/bootloader/bootloader.bin \
-            0x8000  build/partition_table/partition-table.bin \
-            0xf000  build/ota_data_initial.bin \
-            0x20000 build/mimiclaw.bin
+    - name: Install ESP-IDF
+      run: |
+        git clone --recursive --branch ${{ env.ESP_IDF_VERSION }} https://github.com/espressif/esp-idf.git ${{ env.IDF_PATH }}
+        ${{ env.IDF_PATH }}/install.sh esp32s3
+        echo "IDF_PATH=${{ env.IDF_PATH }}" >> $GITHUB_ENV
+        echo "IDF_TOOLS_PATH=$IDF_TOOLS_PATH" >> $GITHUB_ENV
 
-          # Copy individual binaries with version suffix
-          cp build/mimiclaw.bin              "mimiclaw-${VERSION}.bin"
-          cp build/bootloader/bootloader.bin "bootloader-${VERSION}.bin"
-          cp build/partition_table/partition-table.bin "partition-table-${VERSION}.bin"
-          cp build/ota_data_initial.bin      "ota_data_initial-${VERSION}.bin"
+    - name: Set up Environment
+      run: |
+        source ${{ env.IDF_PATH }}/export.sh
+        echo "IDF_TOOLS_PATH=$IDF_TOOLS_PATH" >> $GITHUB_ENV
+        echo "IDF_PATH=$IDF_PATH" >> $GITHUB_ENV
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
-          body: |
-            ## Flashing Guide
+    - name: Configure Project
+      run: |
+        source ${{ env.IDF_PATH }}/export.sh
+        idf.py set-target esp32s3
 
-            ### 1. Merged firmware (easiest)
+    - name: Build Firmware
+      run: |
+        source ${{ env.IDF_PATH }}/export.sh
+        idf.py build
+      continue-on-error: false
 
-            Download `mimiclaw-full-${{ github.ref_name }}.bin` and flash with a single command:
+    - name: Check Build Output
+      run: |
+        if [ -f "build/mimiclaw.bin" ]; then
+          echo "✅ Build succeeded!"
+          ls -lh build/*.bin build/*.elf
+        else
+          echo "❌ Build failed!"
+          ls -R build/
+          exit 1
+        fi
 
-            ```bash
-            esptool.py --chip esp32s3 -b 460800 write_flash 0x0 mimiclaw-full-${{ github.ref_name }}.bin
-            ```
+    - name: Generate Version Info
+      id: version
+      run: |
+        echo "VERSION_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo 'v0.0.0')" >> $GITHUB_OUTPUTS
+        echo "VERSION_DATE=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUTS
+        echo "VERSION_COMMIT=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUTS
+        echo "VERSION_FULL=$(git describe --tags --always 2>/dev/null || git rev-parse --short HEAD)" >> $GITHUB_OUTPUTS
 
-            ### 2. Individual binaries (advanced)
+    - name: Upload Build Artifacts
+      if: success()
+      uses: actions/upload-artifact@v4
+      with:
+        name: firmware-esp32s3
+        path: |
+          build/*.bin
+          build/*.elf
+          build/*.map
+        retention-days: 30
 
-            ```bash
-            esptool.py --chip esp32s3 -b 460800 write_flash \
-              0x0     bootloader-${{ github.ref_name }}.bin \
-              0x8000  partition-table-${{ github.ref_name }}.bin \
-              0xf000  ota_data_initial-${{ github.ref_name }}.bin \
-              0x20000 mimiclaw-${{ github.ref_name }}.bin
-            ```
+    - name: Create Release Notes
+      id: release_notes
+      run: |
+        cat > release_notes.md << 'EOF'
+        # MimiClaw Feishu Hybrid - ${{ steps.version.outputs.VERSION_TAG }}
+        
+        ## 🎉 版本信息
+        - **版本**: ${{ steps.version.outputs.VERSION_FULL }}
+        - **日期**: ${{ steps.version.outputs.VERSION_DATE }}
+        - **提交**: ${{ steps.version.outputs.VERSION_COMMIT }}
+        - **目标**: ESP32-S3 (16MB Flash + 8MB PSRAM)
+        
+        ## 🚀 核心改进
+        
+        ### 异步任务模型
+        - ✅ 3 个任务：WS 任务 + 事件工作器 + Token 刷新
+        - ✅ WebSocket 不阻塞，消息处理更稳定
+        - ✅ 高并发性能
+        
+        ### 应用消息过滤
+        - ✅ 自动过滤飞书官方应用消息
+        - ✅ 减少噪音，降低 Agent 负载
+        - ✅ 提高响应速度
+        
+        ### 网络健康检查
+        - ✅ 连接前检查 WiFi + DNS
+        - ✅ 避免无效连接尝试
+        - ✅ 提前发现问题
+        
+        ### 主动 Token 刷新
+        - ✅ 每 60 秒主动检查刷新
+        - ✅ Token 始终有效
+        - ✅ 提高发送成功率
+        
+        ### 内存优化
+        - ✅ FNV1a64 去重（仅 512 字节）
+        - ✅ 比字符串节省 2.5KB RAM
+        
+        ### 测试辅助函数
+        - ✅ `feishu_parse_chat_id()` - 解析 chat_id
+        - ✅ `feishu_network_ready()` - 网络检查
+        
+        ## 📋 功能清单
+        - [x] WebSocket 长连接
+        - [x] Protobuf 编解码
+        - [x] 消息去重（FNV1a64）
+        - [x] 消息分片发送
+        - [x] 限流保护（5 QPS）
+        - [x] NVS 凭据管理
+        - [x] 消息回复功能
+        - [x] 应用消息过滤
+        - [x] 网络健康检查
+        - [x] 测试辅助函数
+        
+        ## 🔧 使用方式
+        \`\`\`bash
+        # 设置飞书凭据
+        set_feishu_creds <APP_ID> <APP_SECRET>
+        
+        # 发送消息（Agent 自动调用）
+        feishu_send_message("ou_xxx", "你好！")
+        
+        # 回复消息
+        feishu_reply_message("om_xxx", "这是回复")
+        \`\`\`
+        
+        ## 📚 技术文档
+        - 详细说明：`[HYBRID_README.md](main/channels/feishu/HYBRID_README.md)`
+        - 替换报告：`[REPLACEMENT_SUMMARY.md](main/channels/feishu/REPLACEMENT_SUMMARY.md)`
+        
+        ## 🔄 从原版本升级
+        
+        如果你已经在使用原 Feishu 实现，可以直接替换：
+        \`\`\`bash
+        # 备份文件已创建
+        # - feishu_bot.c.backup
+        # - feishu_bot.h.backup
+        
+        # API 接口完全兼容，无需修改调用代码
+        \`\`\`
+        
+        ## ⚠️ 已知限制
+        - 消息分片：超长消息会自动分片，飞书客户端可能不会自动合并
+        - Webhook 模式：已禁用，仅使用 WebSocket 长连接
+        - 群聊提及：目前只支持文本消息，不支持富媒体消息
+        
+        ---
+        
+        **完整提交历史**: [查看提交](../../commits/main)
+        **问题反馈**: [提 Issue](../../issues/new)
+        
+        MimiClaw - ESP32-S3 AI Assistant
+        基于 MimiClaw + EmbedClaw 最佳实践
+        EOF
+        cat release_notes.md
 
-            ### 3. OTA update (for devices already running MimiClaw)
+    - name: Create GitHub Release
+      if: success()
+      needs: build
+      id: create_release
+      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+      env:
+        TAG_NAME: ${{ github.ref_name }}
+        RELEASE_NAME: MimiClaw Feishu Hybrid ${{ steps.version.outputs.VERSION_TAG }}
+      run: |
+        echo "Creating release for tag: ${{ env.TAG_NAME }}"
+        
+        # 下载构建产物
+        mkdir -p release
+        cp build/mimiclaw.bin release/
+        cp build/mimiclaw.elf release/
+        cp build/mimiclaw.map release/
+        
+        gh release create "${{ env.TAG_NAME }}" \
+          "${{ env.RELEASE_NAME }}" \
+          --notes-file release_notes.md \
+          release/mimiclaw.bin \
+          release/mimiclaw.elf \
+          release/mimiclaw.map || echo "Release already exists, skipping..."
 
-            Upload `mimiclaw-${{ github.ref_name }}.bin` via the OTA endpoint.
-
-            ### 4. First-time setup
-
-            After flashing, connect via serial (115200 baud) and configure:
-
-            ```
-            wifi <ssid> <password>
-            tg_token <your-telegram-bot-token>
-            api_key <your-anthropic-api-key>
-            reboot
-            ```
-          files: |
-            mimiclaw-full-${{ github.ref_name }}.bin
-            mimiclaw-${{ github.ref_name }}.bin
-            bootloader-${{ github.ref_name }}.bin
-            partition-table-${{ github.ref_name }}.bin
-            ota_data_initial-${{ github.ref_name }}.bin
+    - name: Manual Release
+      if: success()
+      needs: build
+      id: manual_release
+      if: github.event_name == 'workflow_dispatch' && inputs.create_release == 'true'
+      env:
+        TAG: ${{ inputs.tag_name || 'v'$(date +'%Y.%m.%d') }}
+        RELEASE_NAME: ${{ inputs.release_name || 'MimiClaw Feishu Hybrid' }}
+      run: |
+        TAG="${{ env.TAG }}"
+        RELEASE_NAME="${{ env.RELEASE_NAME }}"
+        
+        echo "Creating manual release: $TAG"
+        
+        # 下载构建产物
+        mkdir -p release
+        cp build/mimiclaw.bin release/
+        cp build/mimiclaw.elf release/
+        cp build/mimiclaw.map release/
+        
+        # 检查 tag 是否存在
+        if gh release view "$TAG" &>/dev/null; then
+          echo "Tag $TAG already exists, updating..."
+          gh release upload "$TAG" \
+            release/mimiclaw.bin \
+            release/mimiclaw.elf \
+            release/mimiclaw.map || true
+        else
+          echo "Creating new release..."
+          gh release create "$TAG" \
+            "$RELEASE_NAME" \
+            --notes "${{ inputs.body }}" \
+            --draft="${{ inputs.draft }}" \
+            release/mimiclaw.bin \
+            release/mimiclaw.elf \
+            release/mimiclaw.map
