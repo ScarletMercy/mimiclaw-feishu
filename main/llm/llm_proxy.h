@@ -18,9 +18,14 @@ esp_err_t llm_proxy_init(void);
 esp_err_t llm_set_api_key(const char *api_key);
 
 /**
- * Save the LLM provider to NVS. (e.g. "anthropic", "openai")
+ * Save LLM provider to NVS. (e.g. "anthropic", "openai", "custom")
  */
 esp_err_t llm_set_provider(const char *provider);
+
+/**
+ * Save custom OpenAI-compatible API base URL to NVS.
+ */
+esp_err_t llm_set_custom_api_url(const char *url);
 
 /**
  * Save the model identifier to NVS.

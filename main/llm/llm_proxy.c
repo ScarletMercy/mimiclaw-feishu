@@ -21,6 +21,7 @@ static const char *TAG = "llm";
 static char s_api_key[LLM_API_KEY_MAX_LEN] = {0};
 static char s_model[LLM_MODEL_MAX_LEN] = MIMI_LLM_DEFAULT_MODEL;
 static char s_provider[16] = MIMI_LLM_PROVIDER_DEFAULT;
+static char s_custom_api_url[256] = MIMI_SECRET_CUSTOM_API_URL;
 
 static void llm_log_payload(const char *label, const char *payload)
 {
@@ -187,18 +188,66 @@ static bool provider_is_openai(void)
     return strcmp(s_provider, "openai") == 0;
 }
 
+static bool provider_is_longcat(void)
+{
+    return strcmp(s_provider, "longcat") == 0;
+}
+
+static bool provider_is_custom(void)
+{
+    return strcmp(s_provider, "custom") == 0;
+}
+
+static bool provider_is_openai_compatible(void)
+{
+    return provider_is_openai() || provider_is_longcat() || provider_is_custom();
+}
+
 static const char *llm_api_url(void)
 {
+    if (provider_is_custom()) {
+        static char custom_url[320];
+        snprintf(custom_url, sizeof(custom_url), "%s/chat/completions", s_custom_api_url);
+        return custom_url;
+    }
+    if (provider_is_longcat()) {
+        return MIMI_LONGCAT_API_URL;
+    }
     return provider_is_openai() ? MIMI_OPENAI_API_URL : MIMI_LLM_API_URL;
 }
 
 static const char *llm_api_host(void)
 {
+    if (provider_is_custom()) {
+        const char *https = strstr(s_custom_api_url, "://");
+        if (https) {
+            const char *host_start = https + 3;
+            const char *slash = strchr(host_start, '/');
+            if (slash) {
+                static char host_buf[256];
+                size_t len = slash - host_start;
+                memcpy(host_buf, host_start, len);
+                host_buf[len] = '\0';
+                return host_buf;
+            }
+            return host_start;
+        }
+        return s_custom_api_url;
+    }
+    if (provider_is_longcat()) {
+        return "api.longcat.chat";
+    }
     return provider_is_openai() ? "api.openai.com" : "api.anthropic.com";
 }
 
 static const char *llm_api_path(void)
 {
+    if (provider_is_custom()) {
+        return "/chat/completions";
+    }
+    if (provider_is_longcat()) {
+        return "/openai/v1/chat/completions";
+    }
     return provider_is_openai() ? "/v1/chat/completions" : "/v1/messages";
 }
 
@@ -215,6 +264,9 @@ esp_err_t llm_proxy_init(void)
     }
     if (MIMI_SECRET_MODEL_PROVIDER[0] != '\0') {
         safe_copy(s_provider, sizeof(s_provider), MIMI_SECRET_MODEL_PROVIDER);
+    }
+    if (MIMI_SECRET_CUSTOM_API_URL[0] != '\0') {
+        safe_copy(s_custom_api_url, sizeof(s_custom_api_url), MIMI_SECRET_CUSTOM_API_URL);
     }
 
     /* NVS overrides take highest priority (set via CLI) */
@@ -234,6 +286,11 @@ esp_err_t llm_proxy_init(void)
         len = sizeof(provider_tmp);
         if (nvs_get_str(nvs, MIMI_NVS_KEY_PROVIDER, provider_tmp, &len) == ESP_OK && provider_tmp[0]) {
             safe_copy(s_provider, sizeof(s_provider), provider_tmp);
+        }
+        char custom_url_tmp[256] = {0};
+        len = sizeof(custom_url_tmp);
+        if (nvs_get_str(nvs, MIMI_NVS_KEY_CUSTOM_API_URL, custom_url_tmp, &len) == ESP_OK && custom_url_tmp[0]) {
+            safe_copy(s_custom_api_url, sizeof(s_custom_api_url), custom_url_tmp);
         }
         nvs_close(nvs);
     }
@@ -265,7 +322,7 @@ static esp_err_t llm_http_direct(const char *post_data, resp_buf_t *rb, int *out
 
     esp_http_client_set_method(client, HTTP_METHOD_POST);
     esp_http_client_set_header(client, "Content-Type", "application/json");
-    if (provider_is_openai()) {
+    if (provider_is_openai_compatible()) {
         if (s_api_key[0]) {
             char auth[LLM_API_KEY_MAX_LEN + 16];
             snprintf(auth, sizeof(auth), "Bearer %s", s_api_key);
@@ -293,7 +350,7 @@ static esp_err_t llm_http_via_proxy(const char *post_data, resp_buf_t *rb, int *
     int body_len = strlen(post_data);
     char header[1024];
     int hlen = 0;
-    if (provider_is_openai()) {
+    if (provider_is_openai_compatible()) {
         hlen = snprintf(header, sizeof(header),
             "POST %s HTTP/1.1\r\n"
             "Host: %s\r\n"
@@ -807,5 +864,18 @@ esp_err_t llm_set_provider(const char *provider)
 
     safe_copy(s_provider, sizeof(s_provider), provider);
     ESP_LOGI(TAG, "Provider set to: %s", s_provider);
+    return ESP_OK;
+}
+
+esp_err_t llm_set_custom_api_url(const char *url)
+{
+    nvs_handle_t nvs;
+    ESP_ERROR_CHECK(nvs_open(MIMI_NVS_LLM, NVS_READWRITE, &nvs));
+    ESP_ERROR_CHECK(nvs_set_str(nvs, MIMI_NVS_KEY_CUSTOM_API_URL, url));
+    ESP_ERROR_CHECK(nvs_commit(nvs));
+    nvs_close(nvs);
+
+    safe_copy(s_custom_api_url, sizeof(s_custom_api_url), url);
+    ESP_LOGI(TAG, "Custom API URL saved");
     return ESP_OK;
 }

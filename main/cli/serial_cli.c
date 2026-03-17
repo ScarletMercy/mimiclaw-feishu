@@ -6,6 +6,7 @@
 #include "llm/llm_proxy.h"
 #include "memory/memory_store.h"
 #include "memory/session_mgr.h"
+#include "esp_system.h"
 #include "proxy/http_proxy.h"
 #include "tools/tool_registry.h"
 #include "tools/tool_web_search.h"
@@ -168,6 +169,24 @@ static int cmd_set_model_provider(int argc, char **argv)
     }
     llm_set_provider(provider_args.provider->sval[0]);
     printf("Model provider set.\n");
+    return 0;
+}
+
+/* --- set_custom_api_url command --- */
+static struct {
+    struct arg_str *url;
+    struct arg_end *end;
+} custom_url_args;
+
+static int cmd_set_custom_api_url(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **)&custom_url_args);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, custom_url_args.end, argv[0]);
+        return 1;
+    }
+    llm_set_custom_api_url(custom_url_args.url->sval[0]);
+    printf("Custom API URL saved.\n");
     return 0;
 }
 
@@ -563,6 +582,7 @@ static int cmd_config_show(int argc, char **argv)
     print_config("API Key",    MIMI_NVS_LLM,    MIMI_NVS_KEY_API_KEY,  MIMI_SECRET_API_KEY,    true);
     print_config("Model",      MIMI_NVS_LLM,    MIMI_NVS_KEY_MODEL,    MIMI_SECRET_MODEL,      false);
     print_config("Provider",   MIMI_NVS_LLM,    MIMI_NVS_KEY_PROVIDER, MIMI_SECRET_MODEL_PROVIDER, false);
+    print_config("Custom URL", MIMI_NVS_LLM,    MIMI_NVS_KEY_CUSTOM_API_URL, MIMI_SECRET_CUSTOM_API_URL, false);
     print_config("Proxy Host", MIMI_NVS_PROXY,  MIMI_NVS_KEY_PROXY_HOST, MIMI_SECRET_PROXY_HOST, false);
     print_config_u16("Proxy Port", MIMI_NVS_PROXY, MIMI_NVS_KEY_PROXY_PORT, MIMI_SECRET_PROXY_PORT);
     print_config("Search Key", MIMI_NVS_SEARCH, MIMI_NVS_KEY_API_KEY,  MIMI_SECRET_SEARCH_KEY, true);
@@ -887,7 +907,7 @@ esp_err_t serial_cli_init(void)
     esp_console_cmd_register(&model_cmd);
 
     /* set_model_provider */
-    provider_args.provider = arg_str1(NULL, NULL, "<provider>", "Model provider (anthropic|openai)");
+    provider_args.provider = arg_str1(NULL, NULL, "<provider>", "Model provider (anthropic|openai|custom)");
     provider_args.end = arg_end(1);
     esp_console_cmd_t provider_cmd = {
         .command = "set_model_provider",
@@ -896,6 +916,17 @@ esp_err_t serial_cli_init(void)
         .argtable = &provider_args,
     };
     esp_console_cmd_register(&provider_cmd);
+
+    /* set_custom_api_url */
+    custom_url_args.url = arg_str1(NULL, NULL, "<url>", "Custom API base URL (e.g., https://api.custom.com/v1)");
+    custom_url_args.end = arg_end(1);
+    esp_console_cmd_t custom_url_cmd = {
+        .command = "set_custom_api_url",
+        .help = "Set custom OpenAI-compatible API base URL",
+        .func = &cmd_set_custom_api_url,
+        .argtable = &custom_url_args,
+    };
+    esp_console_cmd_register(&custom_url_cmd);
 
     /* skill_list */
     esp_console_cmd_t skill_list_cmd = {

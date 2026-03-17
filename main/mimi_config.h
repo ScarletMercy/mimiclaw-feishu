@@ -25,6 +25,9 @@
 #ifndef MIMI_SECRET_MODEL_PROVIDER
 #define MIMI_SECRET_MODEL_PROVIDER  "anthropic"
 #endif
+#ifndef MIMI_SECRET_CUSTOM_API_URL
+#define MIMI_SECRET_CUSTOM_API_URL  ""
+#endif
 #ifndef MIMI_SECRET_PROXY_HOST
 #define MIMI_SECRET_PROXY_HOST      ""
 #endif
@@ -147,6 +150,7 @@
 #define MIMI_NVS_KEY_FEISHU_APP_ID   "app_id"
 #define MIMI_NVS_KEY_FEISHU_APP_SECRET "app_secret"
 #define MIMI_NVS_KEY_API_KEY         "api_key"
+#define MIMI_NVS_KEY_CUSTOM_API_URL  "custom_api_url"
 #define MIMI_NVS_KEY_TAVILY_KEY      "tavily_key"
 #define MIMI_NVS_KEY_MODEL           "model"
 #define MIMI_NVS_KEY_PROVIDER        "provider"
